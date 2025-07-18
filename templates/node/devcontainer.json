@@ -1,8 +1,18 @@
 {
-  "name": "Node DevContainer with code-server",
-  "build": {
-    "dockerfile": "Dockerfile"
+  "name": "Node.js Dev",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
+    }
   },
-  "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"],
-  "postCreateCommand": "npm install"
+  "postCreateCommand": "npm install",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
+      ]
+    }
+  }
 }

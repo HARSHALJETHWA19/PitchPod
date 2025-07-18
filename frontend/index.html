@@ -1,45 +1,35 @@
+
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Launch Dev Container Workspace</title>
+  <title>Secure Workspace Launcher</title>
 </head>
 <body>
-  <h2>Start Dev Workspace</h2>
+  <h1>Dev Platform 🚀</h1>
+  <a href="http://localhost:8000/login"><button>🔐 Login with GitHub</button></a>
+  <hr/>
   <form id="workspaceForm">
-    <label for="repo">Git Repo URL:</label><br>
-    <input type="text" id="repo" name="repo" required><br><br>
-
-    <label for="language">Language:</label><br>
-    <select id="language" name="language">
-      <option value="node">Node</option>
-    </select><br><br>
-
-    <label for="username">Your Name:</label><br>
-    <input type="text" id="username" name="username" required><br><br>
-
-    <button type="submit">Create Workspace</button>
+    <input type="text" id="repo" placeholder="GitHub Repo URL" required><br>
+    <input type="text" id="language" placeholder="Language (e.g. node)" required><br>
+    <input type="text" id="username" placeholder="Your Username" required><br>
+    <button type="submit">Launch Workspace</button>
   </form>
-
-  <div id="result" style="margin-top: 20px;"></div>
-
+  <div id="result"></div>
   <script>
-    const form = document.getElementById('workspaceForm');
-    const result = document.getElementById('result');
-
-    form.addEventListener('submit', async (e) => {
+    const form = document.getElementById("workspaceForm");
+    const result = document.getElementById("result");
+    form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const formData = new FormData(form);
-      const response = await fetch('http://localhost:8000/start-workspace', {
-        method: 'POST',
-        body: formData
+      const repo = document.getElementById("repo").value;
+      const language = document.getElementById("language").value;
+      const username = document.getElementById("username").value;
+      const res = await fetch("http://localhost:8000/start-workspace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo, language, username }),
       });
-
-      const data = await response.json();
-      if (response.ok) {
-        result.innerHTML = `<strong>Workspace Created:</strong> <a href="${data.url}" target="_blank">${data.url}</a>`;
-      } else {
-        result.innerHTML = `<strong>Error:</strong> \${data.detail}`;
-      }
+      const data = await res.json();
+      result.innerHTML = `<strong>Workspace Created:</strong> <a href="${data.url}" target="_blank">${data.url}</a>`;
     });
   </script>
 </body>
