@@ -1,108 +1,155 @@
+# import os, subprocess, uuid, shutil
+# from fastapi import FastAPI, Form
+# from fastapi.middleware.cors import CORSMiddleware
+# from starlette.responses import JSONResponse
+# import shutil
+# import time
 
-import os
-import json
-import shutil
-import subprocess
-import requests
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+# app = FastAPI()
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+# )
+
+# @app.post("/start-workspace")
+# def start_workspace(repo: str = Form(...), username: str = Form(...)):
+#     try:
+#         workspace_id = f"{username}_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+#         workspace_path = f"/tmp/{workspace_id}"
+#         if os.path.exists(workspace_path):
+#             try:
+#                 shutil.rmtree(workspace_path)
+#             except Exception as cleanup_error:
+#                 return JSONResponse(status_code=500, content={"detail": f"Failed to delete existing workspace: {cleanup_error}"})
+
+
+#         # Create .devcontainer
+#         dev_path = os.path.join(workspace_path, ".devcontainer")
+#         os.makedirs(dev_path, exist_ok=True)
+
+#         with open(os.path.join(dev_path, "devcontainer.json"), "w") as f:
+#             f.write(f'''{{
+#   "name": "Universal DevContainer",
+#   "build": {{
+#     "dockerfile": "Dockerfile"
+#   }},
+#   "settings": {{
+#     "terminal.integrated.shell.linux": "/bin/bash"
+#   }},
+#   "postCreateCommand": "git pull",
+#   "forwardPorts": [3000, 5000, 8000, 8888],
+#   "remoteUser": "vscode"
+# }}''')
+
+#         with open(os.path.join(dev_path, "Dockerfile"), "w") as f:
+#             f.write('''FROM mcr.microsoft.com/devcontainers/universal:2
+# RUN apt-get update && apt-get install -y git curl vim''')
+
+#         # Launch IDE container
+#         cmd = [
+#             "docker", "run", "-d",
+#             "-v", f"{workspace_path}:/config/workspace",
+#             "-e", "PASSWORD=harshal123",
+#             "-p", "0:8443",
+#             "--name", workspace_id,
+#             "--label", f"workspace_id={workspace_id}",
+#             "linuxserver/code-server:latest"
+#         ]
+
+#         container_id = subprocess.check_output(cmd).decode().strip()
+#         port_output = subprocess.check_output(["docker", "port", container_id, "8443"]).decode().strip()
+#         host_port = port_output.split(":")[-1]
+
+#         return {
+#             "message": "Workspace created",
+#             "workspace_url": f"http://localhost:{host_port}",
+#             "container_id": container_id
+#         }
+
+#     except Exception as e:
+#         return JSONResponse(status_code=500, content={"detail": str(e)})
+
+import os, subprocess, uuid, shutil
+from fastapi import FastAPI, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from starlette.responses import JSONResponse
+import time
 
-load_dotenv()
 app = FastAPI()
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
 
-GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
-GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
-
-class WorkspaceRequest(BaseModel):
-    repo: str
-    language: str
-    username: str
-
-@app.get("/login")
-def login_with_github():
-    github_oauth_url = (
-        f"https://github.com/login/oauth/authorize?client_id={GITHUB_CLIENT_ID}&scope=repo"
-    )
-    return RedirectResponse(github_oauth_url)
-
-@app.get("/callback")
-def github_callback(code: str):
-    token_url = "https://github.com/login/oauth/access_token"
-    headers = {"Accept": "application/json"}
-    payload = {
-        "client_id": GITHUB_CLIENT_ID,
-        "client_secret": GITHUB_CLIENT_SECRET,
-        "code": code
-    }
-    r = requests.post(token_url, headers=headers, data=payload)
-    access_token = r.json().get("access_token")
-
-    if not access_token:
-        return {"error": "Login failed"}
-
-    user_info = requests.get(
-        "https://api.github.com/user",
-        headers={"Authorization": f"token {access_token}"}
-    ).json()
-
-    return {
-        "message": "Logged in successfully!",
-        "username": user_info.get("login"),
-        "access_token": access_token
-    }
+def detect_language(path):
+    files = os.listdir(path)
+    if "package.json" in files:
+        return "node"
+    elif "requirements.txt" in files or any(f.endswith(".py") for f in files):
+        return "python"
+    elif "pom.xml" in files:
+        return "java"
+    elif "main.go" in files:
+        return "go"
+    elif any(f.endswith(".c") or f.endswith(".cpp") for f in files):
+        return "cpp"
+    else:
+        return "universal"
 
 @app.post("/start-workspace")
-def start_workspace(req: WorkspaceRequest):
-    repo = req.repo
-    language = req.language
-    username = req.username
-    workspace_id = f"{username}_{language}_{__import__('time').strftime('%Y%m%d%H%M%S')}"
-    workspace_path = f"/tmp/{workspace_id}"
-    template_path = f"./templates/{language}"
-
+def start_workspace(repo: str = Form(...), username: str = Form(...)):
     try:
+        workspace_id = f"{username}_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+        workspace_path = f"/tmp/{workspace_id}"
+
+        # Clean if exists
+        if os.path.exists(workspace_path):
+            shutil.rmtree(workspace_path)
+        os.makedirs(workspace_path, exist_ok=True)
+
+        # Clone Git repo
         subprocess.run(["git", "clone", repo, workspace_path], check=True)
-    except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=f"Git clone failed: {str(e)}")
 
-    if not os.path.exists(template_path):
-        raise HTTPException(status_code=500, detail=f"Devcontainer not found for {language}")
+        # Detect Language
+        language = detect_language(workspace_path)
 
-    shutil.copytree(template_path, os.path.join(workspace_path, ".devcontainer"), dirs_exist_ok=True)
+        image_map = {
+            "node": "ghcr.io/devcontainers/javascript-node:18",
+            "python": "ghcr.io/devcontainers/python:3.11",
+            "java": "ghcr.io/devcontainers/java:latest",
+            "go": "ghcr.io/devcontainers/go:latest",
+            "cpp": "ghcr.io/devcontainers/cpp:latest",
+            "universal": "mcr.microsoft.com/devcontainers/universal:2"
+        }
 
-    docker_run = [
-        "docker", "run", "-d",
-        "-v", f"{workspace_path}:/workspace",
-        "-p", "0:8443",
-        "-e", "PASSWORD=harshal123",
-        "--name", workspace_id,
-        "--label", f"workspace_id={workspace_id}",
-        "linuxserver/code-server:latest"
-    ]
+        image = image_map.get(language, image_map["universal"])
 
-    try:
-        subprocess.run(docker_run, check=True, capture_output=True, text=True)
-        inspect_cmd = ["docker", "inspect", workspace_id]
-        inspect_output = subprocess.run(inspect_cmd, capture_output=True, text=True, check=True)
-        inspect_data = json.loads(inspect_output.stdout)
-        port_info = inspect_data[0]["NetworkSettings"]["Ports"].get("8443/tcp")
-        if port_info:
-            host_port = port_info[0]["HostPort"]
-            workspace_url = f"http://localhost:{host_port}"
-        else:
-            workspace_url = "Unavailable"
-    except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to start container: {e.stderr}")
+        # Run Docker with code-server
+        cmd = [
+            "docker", "run", "-d",
+            "-v", f"{workspace_path}:/home/vscode/workspace",
+            "-p", "0:8443",
+            "--name", workspace_id,
+            "--label", f"workspace_id={workspace_id}",
+            image,
+            "code-server",
+            "--auth", "password",
+            "--password", "harshal123",
+            "--bind-addr", "0.0.0.0:8443",
+            "/home/vscode/workspace"
+        ]
 
-    return {"message": "Workspace created", "workspace_id": workspace_id, "url": workspace_url}
+        container_id = subprocess.check_output(cmd).decode().strip()
+
+        port_output = subprocess.check_output(["docker", "port", container_id, "8443"]).decode().strip()
+        host_port = port_output.split(":")[-1]
+
+        return {
+            "message": "Workspace created",
+            "workspace_url": f"http://localhost:{host_port}",
+            "container_id": container_id,
+            "language": language
+        }
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})

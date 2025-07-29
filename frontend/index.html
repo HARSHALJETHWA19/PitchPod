@@ -1,35 +1,59 @@
-
-<!DOCTYPE html>
+<!-- <!DOCTYPE html>
 <html>
-<head>
-  <title>Secure Workspace Launcher</title>
-</head>
+<head><title>Universal Dev Platform</title></head>
 <body>
-  <h1>Dev Platform 🚀</h1>
-  <a href="http://localhost:8000/login"><button>🔐 Login with GitHub</button></a>
-  <hr/>
-  <form id="workspaceForm">
-    <input type="text" id="repo" placeholder="GitHub Repo URL" required><br>
-    <input type="text" id="language" placeholder="Language (e.g. node)" required><br>
-    <input type="text" id="username" placeholder="Your Username" required><br>
-    <button type="submit">Launch Workspace</button>
+  <h2>Launch Dev Workspace</h2>
+  <form id="form">
+    GitHub Repo: <input type="text" id="repo"><br>
+    Username: <input type="text" id="username"><br><br>
+    <button type="submit">Start Workspace</button>
   </form>
   <div id="result"></div>
   <script>
-    const form = document.getElementById("workspaceForm");
-    const result = document.getElementById("result");
-    form.addEventListener("submit", async (e) => {
+    document.getElementById("form").onsubmit = async (e) => {
       e.preventDefault();
-      const repo = document.getElementById("repo").value;
-      const language = document.getElementById("language").value;
-      const username = document.getElementById("username").value;
+      const formData = new FormData();
+      formData.append("repo", document.getElementById("repo").value);
+      formData.append("username", document.getElementById("username").value);
+
       const res = await fetch("http://localhost:8000/start-workspace", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo, language, username }),
+        method: "POST", body: formData
       });
       const data = await res.json();
-      result.innerHTML = `<strong>Workspace Created:</strong> <a href="${data.url}" target="_blank">${data.url}</a>`;
+      document.getElementById("result").innerHTML = res.ok
+        ? `Workspace URL: <a href="${data.workspace_url}" target="_blank">${data.workspace_url}</a>`
+        : `Error: ${data.detail}`;
+    };
+  </script>
+</body>
+</html> -->
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Dev Workspace Launcher</title>
+</head>
+<body>
+  <h2>Start Your Dev Workspace</h2>
+  <form id="workspace-form">
+    GitHub Repo URL: <input type="text" id="repo" name="repo" required><br>
+    Your Username: <input type="text" id="username" name="username" required><br>
+    <button type="submit">Launch Workspace</button>
+  </form>
+  <div id="result"></div>
+
+  <script>
+    document.getElementById('workspace-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const res = await fetch('http://localhost:8000/start-workspace', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      document.getElementById('result').innerHTML = res.ok ?
+        `<p><strong>Detected Language:</strong> ${data.language}</p>
+         <p><a href="${data.workspace_url}" target="_blank">Open Workspace</a></p>` :
+        `<p style="color:red;">Error: ${data.detail}</p>`;
     });
   </script>
 </body>
