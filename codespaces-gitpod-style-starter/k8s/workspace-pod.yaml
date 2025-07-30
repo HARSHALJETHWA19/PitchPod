@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: workspace-WSID
+  labels:
+    app: workspace
+    ws-id: "WSID"
+spec:
+  securityContext:
+    runAsUser: 1000
+    fsGroup: 1000
+  containers:
+  - name: ide
+    image: ghcr.io/coder/code-server:latest
+    env:
+    - name: PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: ws-wsid-secrets
+          key: password
+    ports:
+    - containerPort: 8080
+    volumeMounts:
+    - name: home
+      mountPath: /home/coder
+    - name: workspace
+      mountPath: /workspace
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+  volumes:
+  - name: home
+    persistentVolumeClaim:
+      claimName: home-wsid
+  - name: workspace
+    emptyDir: {}
