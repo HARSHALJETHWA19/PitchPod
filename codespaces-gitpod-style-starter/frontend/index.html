@@ -1,29 +1,128 @@
+
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>Workspace Launcher</title></head>
+<head>
+  <meta charset="utf-8">
+  <title>DevEnv Pro – Workspace Launcher</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
+    input, button { padding: 8px; font-size: 14px; }
+    .row { margin: 8px 0; }
+    pre { background: #f6f8fa; padding: 12px; overflow: auto; }
+    .grid { display: grid; gap: 8px; grid-template-columns: 1fr auto auto auto; align-items: center; }
+  </style>
+</head>
 <body>
-  <h2>Start Your Dev Workspace</h2>
-  <form id="f">
-    <div>GitHub Repo URL:<br><input name="repo" required style="width:420px" placeholder="https://github.com/org/repo"></div>
-    <div>Your Username:<br><input name="username" required style="width:240px" placeholder="alice"></div>
-    <div>Prebuilt Image (optional):<br><input name="prebuilt_image" style="width:420px" placeholder="ghcr.io/org/repo-devcontainer:<sha>"></div>
-    <p><button type="submit">Launch</button></p>
+  <h2>Start a Workspace</h2>
+  <form id="launchForm">
+    <div class="row">Repo URL:<br><input name="repo" id="repo" size="60" placeholder="https://github.com/org/repo" required></div>
+    <div class="row">Username:<br><input name="username" id="username" placeholder="alice" required></div>
+    <div class="row">Prebuilt image (optional):<br><input name="prebuilt_image" id="prebuilt" size="60" placeholder="ghcr.io/org/repo-devcontainer:sha"></div>
+    <div class="row"><button type="submit">Launch</button></div>
   </form>
-  <pre id="out" style="background:#f7f7f7;padding:10px"></pre>
+  <pre id="launchOut"></pre>
+
+  <h2>Prebuild Mapping (SQLite)</h2>
+  <form id="prebuildForm">
+    <div class="row">Repo URL:<br><input id="pbRepo" size="60" placeholder="https://github.com/org/repo" required></div>
+    <div class="row">Image:<br><input id="pbImage" size="60" placeholder="ghcr.io/org/repo-devcontainer:sha" required></div>
+    <div class="row"><button type="submit">Save Mapping</button></div>
+  </form>
+  <pre id="prebuildOut"></pre>
+
+  <h2>My Workspaces</h2>
+  <button id="refreshBtn">Refresh</button>
+  <div id="wsList"></div>
+
   <script>
-    document.getElementById('f').addEventListener('submit', async (e)=>{
+    const API = 'http://127.0.0.1:8000';
+
+    async function postForm(url, data) {
+      const fd = new FormData();
+      Object.entries(data).forEach(([k,v]) => v!=null && fd.append(k, v));
+      const r = await fetch(url, { method:'POST', body: fd });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+      return j;
+    }
+
+    // Launch form
+    document.getElementById('launchForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const fd = new FormData(e.target);
-      const r = await fetch('http://127.0.0.1:8000/start-workspace', { method:'POST', body: fd });
-      const j = await r.json();
-      document.getElementById('out').textContent = JSON.stringify(j, null, 2);
-      if (r.ok && j.workspace_url) {
-        const a = document.createElement('a');
-        a.href = j.workspace_url; a.target = '_blank'; a.textContent = 'Open IDE';
-        document.getElementById('out').appendChild(document.createElement('br'));
-        document.getElementById('out').appendChild(a);
+      const repo = document.getElementById('repo').value.trim();
+      const username = document.getElementById('username').value.trim();
+      const prebuilt_image = document.getElementById('prebuilt').value.trim();
+      try {
+        const j = await postForm(`${API}/start-workspace`, { repo, username, prebuilt_image });
+        document.getElementById('launchOut').textContent = JSON.stringify(j, null, 2);
+        if (j.workspace_url) {
+          const a = document.createElement('a');
+          a.href = j.workspace_url; a.target = '_blank'; a.textContent = 'Open IDE';
+          document.getElementById('launchOut').appendChild(document.createElement('br'));
+          document.getElementById('launchOut').appendChild(a);
+          // start ping loop to keep alive
+          startPing(j.container_id);
+        }
+      } catch (err) {
+        document.getElementById('launchOut').textContent = String(err);
       }
     });
+
+    // Save prebuild mapping
+    document.getElementById('prebuildForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const repo = document.getElementById('pbRepo').value.trim();
+      const image = document.getElementById('pbImage').value.trim();
+      try {
+        const j = await postForm(`${API}/prebuild`, { repo, image });
+        document.getElementById('prebuildOut').textContent = JSON.stringify(j, null, 2);
+      } catch (err) {
+        document.getElementById('prebuildOut').textContent = String(err);
+      }
+    });
+
+    // List workspaces
+    async function refreshWs() {
+      const r = await fetch(`${API}/workspaces`);
+      const list = await r.json();
+      const container = document.getElementById('wsList');
+      container.innerHTML = '';
+      const grid = document.createElement('div');
+      grid.className = 'grid';
+      const head = ['ID', 'Open', 'Logs', 'Stop'];
+      head.forEach(h => { const b = document.createElement('b'); b.textContent=h; grid.appendChild(b); });
+      list.forEach(ws => {
+        const id = document.createElement('code'); id.textContent = ws.id;
+        const open = document.createElement('button'); open.textContent='Open';
+        const logs = document.createElement('button'); logs.textContent='Logs';
+        const stop = document.createElement('button'); stop.textContent='Stop';
+        open.onclick = async () => {
+          alert('Open the URL returned when you launched the workspace. This demo UI does not persist those URLs per container yet.');
+        };
+        logs.onclick = async () => {
+          const rr = await fetch(`${API}/logs?id=${encodeURIComponent(ws.id)}`);
+          const jj = await rr.json();
+          alert(jj.logs || '(no logs)');
+        };
+        stop.onclick = async () => {
+          await postForm(`${API}/stop-workspace`, { container_id: ws.id });
+          refreshWs();
+        };
+        grid.appendChild(id); grid.appendChild(open); grid.appendChild(logs); grid.appendChild(stop);
+      });
+      container.appendChild(grid);
+    }
+    document.getElementById('refreshBtn').addEventListener('click', refreshWs);
+    refreshWs();
+
+    // keep-alive pings
+    const pingTimers = {};
+    function startPing(container_id) {
+      if (pingTimers[container_id]) return;
+      pingTimers[container_id] = setInterval(async () => {
+        try { await postForm(`${API}/ping`, { container_id }); } catch {}
+      }, 60 * 1000);
+    }
   </script>
 </body>
 </html>
