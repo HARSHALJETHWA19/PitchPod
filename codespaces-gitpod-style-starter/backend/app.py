@@ -217,28 +217,65 @@ exec code-server /workspace --auth password --bind-addr 0.0.0.0:{container_port}
 @app.post("/stop-workspace")
 def stop_workspace(container_id: str = Form(...)):
     try:
+        sh(["docker", "stop", container_id])
+        return {"message": "Stopped", "container_id": container_id}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+@app.post("/start-container")
+def start_container(container_id: str = Form(...)):
+    try:
+        sh(["docker", "start", container_id])
+        return {"message": "Started", "container_id": container_id}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+    
+@app.post("/delete-workspace")
+def delete_workspace(container_id: str = Form(...)):
+    try:
         sh(["docker", "rm", "-f", container_id])
         with last_ping_lock:
             last_ping.pop(container_id, None)
-        return {"message": "Stopped", "container_id": container_id}
+        return {"message": "Deleted", "container_id": container_id}
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
 @app.get("/workspaces")
 def list_workspaces():
-    out = sh(["docker","ps","--filter","label=workspace_id","--format","{{.ID}} {{.Image}} {{.Names}} {{.Ports}}"], allow_fail=True)
+    # out = sh(["docker","ps","--filter","label=workspace_id","--format","{{.ID}} {{.Image}} {{.Names}} {{.Ports}}"], allow_fail=True)
+    out = sh(["docker","ps","-a","--filter","label=workspace_id","--format","{{.ID}} {{.Image}} {{.Names}} {{.Ports}} {{.Status}}"], allow_fail=True)   
     items = []
     for line in out.splitlines():
         parts = line.split()
-        if not parts: 
+        if not parts:
             continue
         cid = parts[0]
         image = parts[1] if len(parts) > 1 else ""
         name = parts[2] if len(parts) > 2 else ""
-        ports = " ".join(parts[3:]) if len(parts) > 3 else ""
+        ports = parts[3] if len(parts) > 3 else ""
+        status = " ".join(parts[4:]) if len(parts) > 4 else ""
         with last_ping_lock:
             lp = last_ping.get(cid)
-        items.append({"id": cid, "image": image, "name": name, "ports": ports, "last_ping": lp})
+        items.append({
+            "id": cid,
+            "image": image,
+            "name": name,
+            "ports": ports,
+            "status": status,
+            "last_ping": lp
+        })
+
+    # for line in out.splitlines():
+    #     parts = line.split()
+    #     if not parts: 
+    #         continue
+    #     cid = parts[0]
+    #     image = parts[1] if len(parts) > 1 else ""
+    #     name = parts[2] if len(parts) > 2 else ""
+    #     ports = " ".join(parts[3:]) if len(parts) > 3 else ""
+    #     with last_ping_lock:
+    #         lp = last_ping.get(cid)
+    #     items.append({"id": cid, "image": image, "name": name, "ports": ports, "last_ping": lp})
     return items
 
 @app.get("/logs")
@@ -265,3 +302,6 @@ def set_prebuild(repo: str = Form(...), image: str = Form(...)):
 def get_prebuild(repo: str):
     img = db_get_prebuilt(repo)
     return {"repo": repo, "image": img}
+
+
+

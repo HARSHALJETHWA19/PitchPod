@@ -1,128 +1,217 @@
-
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>DevEnv Pro – Workspace Launcher</title>
+  <meta charset="UTF-8">
+  <title>Dev Workspace Dashboard</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
-    input, button { padding: 8px; font-size: 14px; }
-    .row { margin: 8px 0; }
-    pre { background: #f6f8fa; padding: 12px; overflow: auto; }
-    .grid { display: grid; gap: 8px; grid-template-columns: 1fr auto auto auto; align-items: center; }
+    body {
+      font-family: Arial, sans-serif;
+      padding: 2em;
+      background: #f4f4f4;
+    }
+    h2 {
+      margin-top: 2em;
+    }
+    form {
+      background: #fff;
+      padding: 1em;
+      margin-bottom: 2em;
+      border-radius: 5px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.1);
+    }
+    input, button {
+      padding: 0.5em;
+      margin: 0.3em 0;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    button {
+      background: #007bff;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    .log {
+      background: #222;
+      color: #0f0;
+      padding: 0.5em;
+      font-family: monospace;
+      overflow-y: auto;
+      max-height: 200px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1em;
+      background: #fff;
+    }
+    table, th, td {
+      border: 1px solid #ccc;
+    }
+    th, td {
+      padding: 0.5em;
+      text-align: left;
+    }
   </style>
 </head>
 <body>
-  <h2>Start a Workspace</h2>
-  <form id="launchForm">
-    <div class="row">Repo URL:<br><input name="repo" id="repo" size="60" placeholder="https://github.com/org/repo" required></div>
-    <div class="row">Username:<br><input name="username" id="username" placeholder="alice" required></div>
-    <div class="row">Prebuilt image (optional):<br><input name="prebuilt_image" id="prebuilt" size="60" placeholder="ghcr.io/org/repo-devcontainer:sha"></div>
-    <div class="row"><button type="submit">Launch</button></div>
-  </form>
-  <pre id="launchOut"></pre>
 
-  <h2>Prebuild Mapping (SQLite)</h2>
-  <form id="prebuildForm">
-    <div class="row">Repo URL:<br><input id="pbRepo" size="60" placeholder="https://github.com/org/repo" required></div>
-    <div class="row">Image:<br><input id="pbImage" size="60" placeholder="ghcr.io/org/repo-devcontainer:sha" required></div>
-    <div class="row"><button type="submit">Save Mapping</button></div>
-  </form>
-  <pre id="prebuildOut"></pre>
+  <h1>Dev Workspace Launcher</h1>
 
-  <h2>My Workspaces</h2>
-  <button id="refreshBtn">Refresh</button>
-  <div id="wsList"></div>
+  <!-- 🌱 Start Workspace -->
+  <form id="workspace-form">
+    <h2>🚀 Start a Workspace</h2>
+    <label>Repo URL:</label>
+    <input type="text" name="repo" value="https://github.com/HARSHALJETHWA19/ansible-project" required>
+    
+    <label>Username:</label>
+    <input type="text" name="username" value="admin" required>
+
+    <label>Prebuilt image (optional):</label>
+    <input type="text" name="prebuilt_image" placeholder="ghcr.io/org/repo-devcontainer:sha">
+
+    <button type="submit">Launch</button>
+    <pre class="log" id="workspace-log"></pre>
+  </form>
+
+  <!-- 💾 Prebuild Mapping -->
+  <form id="prebuild-form">
+    <h2>💾 Prebuild Mapping (SQLite)</h2>
+    <label>Repo URL:</label>
+    <input type="text" name="repo" value="https://github.com/HARSHALJETHWA19/ansible-project" required>
+
+    <label>Image:</label>
+    <input type="text" name="image" value="mcr.microsoft.com/devcontainers/dotnet:9.0" required>
+
+    <button type="submit">Save Mapping</button>
+    <pre class="log" id="prebuild-log"></pre>
+  </form>
+
+  <!-- 📊 Live Dashboard -->
+  <div>
+    <h2>📊 Live Dashboard</h2>
+    <button onclick="refreshWorkspaces()">🔄 Refresh</button>
+    <table id="workspace-table">
+      <thead>
+  <tr>
+    <th>Container ID</th>
+    <th>Image</th>
+    <th>Name</th>
+    <th>Port</th>
+    <th>Status</th> <!-- ✅ added -->
+    <th>Last Ping</th>
+    <th>Action</th>
+  </tr>
+</thead>
+      <tbody></tbody>
+    </table>
+  </div>
 
   <script>
-    const API = 'http://127.0.0.1:8000';
+    const base = "http://localhost:8000"; // API base
 
-    async function postForm(url, data) {
-      const fd = new FormData();
-      Object.entries(data).forEach(([k,v]) => v!=null && fd.append(k, v));
-      const r = await fetch(url, { method:'POST', body: fd });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
-      return j;
-    }
+    const wsForm = document.getElementById("workspace-form");
+    const prebuildForm = document.getElementById("prebuild-form");
+    const wsLog = document.getElementById("workspace-log");
+    const pbLog = document.getElementById("prebuild-log");
+    const wsTableBody = document.querySelector("#workspace-table tbody");
 
-    // Launch form
-    document.getElementById('launchForm').addEventListener('submit', async (e) => {
+    // 🌱 Launch Workspace
+    wsForm.onsubmit = async (e) => {
       e.preventDefault();
-      const repo = document.getElementById('repo').value.trim();
-      const username = document.getElementById('username').value.trim();
-      const prebuilt_image = document.getElementById('prebuilt').value.trim();
-      try {
-        const j = await postForm(`${API}/start-workspace`, { repo, username, prebuilt_image });
-        document.getElementById('launchOut').textContent = JSON.stringify(j, null, 2);
-        if (j.workspace_url) {
-          const a = document.createElement('a');
-          a.href = j.workspace_url; a.target = '_blank'; a.textContent = 'Open IDE';
-          document.getElementById('launchOut').appendChild(document.createElement('br'));
-          document.getElementById('launchOut').appendChild(a);
-          // start ping loop to keep alive
-          startPing(j.container_id);
-        }
-      } catch (err) {
-        document.getElementById('launchOut').textContent = String(err);
-      }
-    });
-
-    // Save prebuild mapping
-    document.getElementById('prebuildForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const repo = document.getElementById('pbRepo').value.trim();
-      const image = document.getElementById('pbImage').value.trim();
-      try {
-        const j = await postForm(`${API}/prebuild`, { repo, image });
-        document.getElementById('prebuildOut').textContent = JSON.stringify(j, null, 2);
-      } catch (err) {
-        document.getElementById('prebuildOut').textContent = String(err);
-      }
-    });
-
-    // List workspaces
-    async function refreshWs() {
-      const r = await fetch(`${API}/workspaces`);
-      const list = await r.json();
-      const container = document.getElementById('wsList');
-      container.innerHTML = '';
-      const grid = document.createElement('div');
-      grid.className = 'grid';
-      const head = ['ID', 'Open', 'Logs', 'Stop'];
-      head.forEach(h => { const b = document.createElement('b'); b.textContent=h; grid.appendChild(b); });
-      list.forEach(ws => {
-        const id = document.createElement('code'); id.textContent = ws.id;
-        const open = document.createElement('button'); open.textContent='Open';
-        const logs = document.createElement('button'); logs.textContent='Logs';
-        const stop = document.createElement('button'); stop.textContent='Stop';
-        open.onclick = async () => {
-          alert('Open the URL returned when you launched the workspace. This demo UI does not persist those URLs per container yet.');
-        };
-        logs.onclick = async () => {
-          const rr = await fetch(`${API}/logs?id=${encodeURIComponent(ws.id)}`);
-          const jj = await rr.json();
-          alert(jj.logs || '(no logs)');
-        };
-        stop.onclick = async () => {
-          await postForm(`${API}/stop-workspace`, { container_id: ws.id });
-          refreshWs();
-        };
-        grid.appendChild(id); grid.appendChild(open); grid.appendChild(logs); grid.appendChild(stop);
+      wsLog.textContent = "Starting...";
+      const formData = new FormData(wsForm);
+      const res = await fetch(`${base}/start-workspace`, {
+        method: "POST",
+        body: formData
       });
-      container.appendChild(grid);
-    }
-    document.getElementById('refreshBtn').addEventListener('click', refreshWs);
-    refreshWs();
+      const json = await res.json();
+      wsLog.textContent = JSON.stringify(json, null, 2);
+      if (json.workspace_url) {
+        const a = document.createElement("a");
+        a.href = json.workspace_url;
+        a.textContent = "👉 Open IDE";
+        a.target = "_blank";
+        wsLog.appendChild(document.createElement("br"));
+        wsLog.appendChild(a);
+      }
+      refreshWorkspaces();
+    };
 
-    // keep-alive pings
-    const pingTimers = {};
-    function startPing(container_id) {
-      if (pingTimers[container_id]) return;
-      pingTimers[container_id] = setInterval(async () => {
-        try { await postForm(`${API}/ping`, { container_id }); } catch {}
-      }, 60 * 1000);
+    // 💾 Save Prebuild Mapping
+    prebuildForm.onsubmit = async (e) => {
+      e.preventDefault();
+      pbLog.textContent = "Saving...";
+      const formData = new FormData(prebuildForm);
+      const res = await fetch(`${base}/prebuild`, {
+        method: "POST",
+        body: formData
+      });
+      const json = await res.json();
+      pbLog.textContent = JSON.stringify(json, null, 2);
+    };
+
+    // 📊 Refresh Workspaces
+    async function refreshWorkspaces() {
+      const res = await fetch(`${base}/workspaces`);
+      const data = await res.json();
+      wsTableBody.innerHTML = "";
+      data.forEach(w => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+  <td>${w.id}</td>
+  <td>${w.image}</td>
+  <td>${w.name}</td>
+  <td>${w.ports}</td>
+  <td style="color: ${w.status.includes('Up') ? 'green' : 'red'}">${w.status}</td>
+  <td>${w.last_ping ? new Date(w.last_ping * 1000).toLocaleString() : "?"}</td>
+  <td>
+    ${w.status.includes("Up") ? `
+      <button onclick="stopWorkspace('${w.id}')">⏸️ Stop</button>
+    ` : `
+      <button onclick="startWorkspace('${w.id}')">▶️ Start</button>
+    `}
+    <button onclick="deleteWorkspace('${w.id}')">🗑️ Delete</button>
+  </td>
+`;
+
+
+        wsTableBody.appendChild(tr);
+      });
     }
+
+    // 🛑 Stop Workspace
+    async function stopWorkspace(id) {
+      await fetch(`${base}/stop-workspace`, {
+        method: "POST",
+        body: new URLSearchParams({ container_id: id })
+      });
+      refreshWorkspaces();
+    }
+
+    async function deleteWorkspace(id) {
+  if (confirm(`Are you sure you want to delete workspace ${id}?`)) {
+    await fetch(`${base}/delete-workspace`, {
+      method: "POST",
+      body: new URLSearchParams({ container_id: id })
+    });
+    refreshWorkspaces();
+  }
+}
+
+async function startWorkspace(id) {
+  await fetch(`${base}/start-container`, {
+    method: "POST",
+    body: new URLSearchParams({ container_id: id })
+  });
+  refreshWorkspaces();
+}
+    // 🔁 Initial load
+    refreshWorkspaces();
+
   </script>
 </body>
 </html>
