@@ -135,7 +135,6 @@ def on_startup():
     t.start()
 
 # ---------------- API ----------------
-
 @app.post("/start-workspace")
 def start_workspace(
     repo: str = Form(...),
@@ -147,34 +146,39 @@ def start_workspace(
         work_vol = f"code_{ws_id}"
         tools_vol = f"tools_{username}".lower()
 
-        # Resolve devcontainer and prebuilt image mapping
+        # Detect language + get .devcontainer or fallback image
         devc = resolve_devcontainer(repo)
-        mapped = prebuilt_image or db_get_prebuilt(repo)  # prefer explicit form value
+        mapped = prebuilt_image or db_get_prebuilt(repo)
+        # base_image = mapped or devc.get("image") or "mcr.microsoft.com/devcontainers/base:ubuntu"
+
         base_image = mapped or devc.get("image") or "mcr.microsoft.com/devcontainers/base:ubuntu"
+        sh(["docker", "pull", base_image])  # PRE-PULL to avoid timeout
+
 
         container_port = default_port_for_image(base_image)
-        img_lower = base_image.lower()
-        codeserver_img = ("coder/code-server" in img_lower) or ("ghcr.io/coder/code-server" in img_lower) or ("linuxserver/code-server" in img_lower) or ("lscr.io/linuxserver/code-server" in img_lower)
+        is_code_image = is_codeserver_image(base_image)
 
         run_cmd = [
-            "docker","run","-d",
+            "docker", "run", "-d",
             "-p", f"0:{container_port}",
             "--name", ws_id,
             "--label", f"workspace_id={ws_id}",
             "-v", f"{work_vol}:/workspace",
-            "-v", f"{tools_vol}:/opt/tools"
+            "-v", f"{tools_vol}:/opt/tools",
         ]
 
-        if codeserver_img:
+        if is_code_image:
             run_cmd += ["-e", f"PASSWORD={PASSWORD}", base_image]
             cid = sh(run_cmd)
-            sh(["docker","exec","-i",cid,"bash","-lc",
+            # Inject repo manually
+            sh([
+                "docker", "exec", "-i", cid, "bash", "-lc",
                 f"apt-get update || true; apt-get install -y git curl || true; "
-                f"rm -rf /workspace/* 2>/dev/null || true; git clone '{repo}' /workspace || true"])
+                f"rm -rf /workspace/* 2>/dev/null || true; git clone '{repo}' /workspace || true"
+            ])
         else:
             run_cmd += [
-                base_image, "bash","-lc",
-                f"""
+                base_image, "bash", "-lc", f"""
 set -e
 apt-get update && apt-get install -y curl git ca-certificates || true
 if [ -z "$(ls -A /workspace 2>/dev/null)" ]; then git clone '{repo}' /workspace || true; fi
@@ -185,15 +189,16 @@ exec code-server /workspace --auth password --bind-addr 0.0.0.0:{container_port}
             ]
             cid = sh(run_cmd)
 
-        # postCreateCommand (best-effort)
-        pcc = devc.get("postCreateCommand")
-        if pcc:
-            sh(["docker","exec","-i",cid,"bash","-lc", f"cd /workspace && {pcc}"], allow_fail=True)
+        # Optional postCreateCommand from devcontainer.json
+        if devc.get("postCreateCommand"):
+            sh([
+                "docker", "exec", "-i", cid, "bash", "-lc",
+                f"cd /workspace && {devc['postCreateCommand']}"
+            ], allow_fail=True)
 
-        # wait and return URL
-        host_port = wait_for_port(cid, container_port, timeout_sec=60)
-
-        # mark ping now
+        # Wait until host port is mapped
+        host_port = wait_for_port(cid, container_port, timeout_sec=120)
+        # host_port = wait_for_port(cid, container_port, timeout_sec=120)
         mark_ping(cid)
 
         return {
@@ -204,9 +209,10 @@ exec code-server /workspace --auth password --bind-addr 0.0.0.0:{container_port}
             "devcontainer_used": bool(devc),
             "idle_timeout_minutes": IDLE_MINUTES
         }
+
     except Exception as e:
-        detail = str(e)
-        return JSONResponse(status_code=500, content={"detail": detail})
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
 
 @app.post("/stop-workspace")
 def stop_workspace(container_id: str = Form(...)):
