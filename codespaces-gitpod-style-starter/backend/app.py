@@ -1,4 +1,4 @@
-
+from fastapi import Body
 import os, subprocess, uuid, time, json, tempfile, sqlite3, threading
 from fastapi import FastAPI, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -295,6 +295,49 @@ def start_workspace(
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
+@app.post("/generate-devcontainer")
+def generate_devcontainer(
+    repo: str = Form(...),
+    language: str = Form(...),
+    ports: str = Form(""),
+    post_create: str = Form("")
+):
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            sh(["git", "clone", repo, tmp])
+            dev_path = os.path.join(tmp, ".devcontainer")
+            os.makedirs(dev_path, exist_ok=True)
+
+            image_map = {
+                "node": "mcr.microsoft.com/devcontainers/javascript-node:1-20-bullseye",
+                "python": "mcr.microsoft.com/devcontainers/python:3.11",
+                "java": "mcr.microsoft.com/devcontainers/java:17",
+                "go": "mcr.microsoft.com/devcontainers/go:1.22",
+                "dotnet": "mcr.microsoft.com/devcontainers/dotnet:9.0"
+            }
+
+            forward_ports = [int(p.strip()) for p in ports.split(",") if p.strip().isdigit()]
+            devcontainer = {
+                "image": image_map.get(language.lower(), "mcr.microsoft.com/devcontainers/base:ubuntu"),
+            }
+            if forward_ports:
+                devcontainer["forwardPorts"] = forward_ports
+            if post_create:
+                devcontainer["postCreateCommand"] = post_create
+
+            with open(os.path.join(dev_path, "devcontainer.json"), "w") as f:
+                json.dump(devcontainer, f, indent=2)
+
+            # commit + push back (optional)
+            sh(["git", "-C", tmp, "config", "user.email", "dev@example.com"])
+            sh(["git", "-C", tmp, "config", "user.name", "Dev Bot"])
+            sh(["git", "-C", tmp, "add", ".devcontainer/devcontainer.json"])
+            sh(["git", "-C", tmp, "commit", "-m", "Add devcontainer.json"])
+            sh(["git", "-C", tmp, "push"])
+
+        return {"message": "Generated and pushed .devcontainer.json!"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
 
 @app.get("/volumes")
 def list_volumes():

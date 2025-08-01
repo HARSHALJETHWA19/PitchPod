@@ -87,6 +87,32 @@
     <pre class="log" id="workspace-log"></pre>
   </form>
 
+  <!-- ✨ DevContainer Generator -->
+<form id="devcontainer-form">
+  <h2>⚙️ Generate .devcontainer.json</h2>
+  <label>Repo URL:</label>
+  <input type="text" name="repo" required value="https://github.com/HARSHALJETHWA19/ansible-project">
+
+  <label>Language:</label>
+  <select name="language" required>
+    <option value="node">Node.js</option>
+    <option value="python">Python</option>
+    <option value="java">Java</option>
+    <option value="go">Go</option>
+    <option value="dotnet">.NET</option>
+  </select>
+
+  <label>Ports (comma-separated):</label>
+  <input type="text" name="ports" placeholder="3000,8000">
+
+  <label>Post Create Command:</label>
+  <input type="text" name="post_create" placeholder="npm ci">
+
+  <button type="submit">Generate devcontainer.json</button>
+  <pre class="log" id="dev-log"></pre>
+</form>
+
+
   <!-- 💾 Prebuild Mapping -->
   <form id="prebuild-form">
     <h2>💾 Prebuild Mapping (SQLite)</h2>
@@ -178,6 +204,16 @@
       pbLog.textContent = JSON.stringify(json, null, 2);
     };
 
+function timeSince(ts) {
+  const seconds = Math.floor(Date.now() / 1000 - ts);
+  const mins = Math.floor(seconds / 60);
+  if (mins < 1) return `${seconds}s`;
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  return `${hours}h ${mins % 60}m`;
+}
+
+
     // 📊 Refresh Workspaces
     async function refreshWorkspaces() {
       const res = await fetch(`${base}/workspaces`);
@@ -190,7 +226,7 @@
   <td>${w.image}</td>
   <td>${w.name}</td>
   <td>${w.ports}</td>
-  <td>${w.last_ping ? new Date(w.last_ping * 1000).toLocaleString() : "?"}</td>
+  <td>${w.last_ping ? timeSince(w.last_ping) + " ago" : "?"}</td>
   <td style="color: ${w.status.includes('Up') ? 'green' : 'red'}">${w.status}</td>
   <td>
     ${w.status.includes("Up") ? `
@@ -200,6 +236,8 @@
     `}
     <button onclick="deleteWorkspace('${w.id}')">🗑️ Delete</button>
     <button onclick="checkUpdate('${w.id}', '${w.name}')">🔄 Check Update</button>
+    <button onclick="showLogs('${w.id}')">📜 Logs</button>
+
   </td>
 `;
 
@@ -217,6 +255,8 @@
       });
       refreshWorkspaces();
     }
+
+  
 
     async function deleteWorkspace(id) {
   if (confirm(`Are you sure you want to delete workspace ${id}?`)) {
@@ -264,6 +304,12 @@ async function loadVolumes() {
   });
 }
 
+async function showLogs(id) {
+  const res = await fetch(`${base}/logs?id=${id}`);
+  const json = await res.json();
+  alert(`Logs for ${id}:\n\n` + json.logs);
+}
+
 
 
 async function rebuildWorkspace(id, repo, username) {
@@ -286,6 +332,22 @@ async function rebuildWorkspace(id, repo, username) {
     refreshWorkspaces();
 
     loadVolumes();
+
+    const devForm = document.getElementById("devcontainer-form");
+const devLog = document.getElementById("dev-log");
+
+devForm.onsubmit = async (e) => {
+  e.preventDefault();
+  devLog.textContent = "Generating...";
+  const formData = new FormData(devForm);
+  const res = await fetch(`${base}/generate-devcontainer`, {
+    method: "POST",
+    body: formData
+  });
+  const json = await res.json();
+  devLog.textContent = JSON.stringify(json, null, 2);
+};
+
 
   </script>
 </body>
