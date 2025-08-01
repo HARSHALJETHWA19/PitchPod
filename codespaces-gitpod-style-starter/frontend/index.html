@@ -73,6 +73,16 @@
     <label>Prebuilt image (optional):</label>
     <input type="text" name="prebuilt_image" placeholder="ghcr.io/org/repo-devcontainer:sha">
 
+    <label>
+      <input type="checkbox" id="reuseVolume"> Reuse my previous workspace
+    </label>
+
+    <label>Custom Volume (optional):</label>
+    <select id="volumeSelector">
+      <option value="">-- Select Existing Volume --</option>
+    </select>
+
+
     <button type="submit">Launch</button>
     <pre class="log" id="workspace-log"></pre>
   </form>
@@ -118,12 +128,26 @@
     const wsLog = document.getElementById("workspace-log");
     const pbLog = document.getElementById("prebuild-log");
     const wsTableBody = document.querySelector("#workspace-table tbody");
+    // const reuseVolume = document.getElementById('reuseVolume').checked;
+
+    // formData.append('reuse_volume', reuseVolume);
 
     // 🌱 Launch Workspace
     wsForm.onsubmit = async (e) => {
       e.preventDefault();
       wsLog.textContent = "Starting...";
       const formData = new FormData(wsForm);
+
+      const reuseVolume = document.getElementById('reuseVolume').checked;
+      formData.append('reuse_volume', reuseVolume); // ✅ Move here
+
+      const volumeSelector = document.getElementById("volumeSelector");
+      const selectedVolume = volumeSelector.value;
+      if (selectedVolume) {
+        formData.append("custom_volume_name", selectedVolume);
+      }
+
+
       const res = await fetch(`${base}/start-workspace`, {
         method: "POST",
         body: formData
@@ -166,8 +190,8 @@
   <td>${w.image}</td>
   <td>${w.name}</td>
   <td>${w.ports}</td>
-  <td style="color: ${w.status.includes('Up') ? 'green' : 'red'}">${w.status}</td>
   <td>${w.last_ping ? new Date(w.last_ping * 1000).toLocaleString() : "?"}</td>
+  <td style="color: ${w.status.includes('Up') ? 'green' : 'red'}">${w.status}</td>
   <td>
     ${w.status.includes("Up") ? `
       <button onclick="stopWorkspace('${w.id}')">⏸️ Stop</button>
@@ -175,8 +199,10 @@
       <button onclick="startWorkspace('${w.id}')">▶️ Start</button>
     `}
     <button onclick="deleteWorkspace('${w.id}')">🗑️ Delete</button>
+    <button onclick="checkUpdate('${w.id}', '${w.name}')">🔄 Check Update</button>
   </td>
 `;
+
 
 
         wsTableBody.appendChild(tr);
@@ -209,8 +235,57 @@ async function startWorkspace(id) {
   });
   refreshWorkspaces();
 }
+
+async function checkUpdate(id, name) {
+  const repo = document.querySelector('input[name="repo"]').value;
+  const res = await fetch(`${base}/check-update?container_id=${id}&repo=${encodeURIComponent(repo)}`);
+  const json = await res.json();
+
+  alert(`Container ${id} is ${json.status.toUpperCase()}\nStored SHA: ${json.stored_sha}\nLatest SHA: ${json.latest_sha}`);
+
+  if (json.status === "outdated") {
+    if (confirm("Repo has changed. Do you want to REBUILD this workspace?")) {
+      await rebuildWorkspace(id, repo, name.split("-")[0]); // extract username from container name
+    }
+  }
+}
+
+async function loadVolumes() {
+  const res = await fetch(`${base}/volumes`);
+  const data = await res.json();
+  console.log("Fetched volumes:", data); // 🔍 Add this line
+
+  const selector = document.getElementById("volumeSelector");
+  data.volumes.forEach(v => {
+    const opt = document.createElement("option");
+    opt.value = v;
+    opt.textContent = v;
+    selector.appendChild(opt);
+  });
+}
+
+
+
+async function rebuildWorkspace(id, repo, username) {
+  const image = document.querySelector('input[name="prebuilt_image"]').value;
+  const body = new URLSearchParams({ container_id: id, repo, username });
+  if (image) body.append("prebuilt_image", image);
+
+  const res = await fetch(`${base}/rebuild-workspace`, {
+    method: "POST",
+    body
+  });
+  const json = await res.json();
+  alert("Rebuilt workspace:\n" + JSON.stringify(json, null, 2));
+  refreshWorkspaces();
+}
+
+
+
     // 🔁 Initial load
     refreshWorkspaces();
+
+    loadVolumes();
 
   </script>
 </body>

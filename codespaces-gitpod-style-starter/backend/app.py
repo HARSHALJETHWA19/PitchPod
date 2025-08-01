@@ -40,6 +40,28 @@ def default_port_for_image(image: str) -> str:
         return "8443"
     return "8080"
 
+def db_get_last_volume(username: str):
+    con = sqlite3.connect(DB_PATH)
+    try:
+        cur = con.execute("SELECT volume_name FROM volume_history WHERE username = ?", (username,))
+        row = cur.fetchone()
+        return row[0] if row else None
+    finally:
+        con.close()
+
+def db_set_last_volume(username: str, volume_name: str):
+    con = sqlite3.connect(DB_PATH)
+    try:
+        con.execute("""
+            INSERT INTO volume_history(username, volume_name, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET volume_name=excluded.volume_name, updated_at=excluded.updated_at
+        """, (username, volume_name, int(time.time())))
+        con.commit()
+    finally:
+        con.close()
+
+
 def wait_for_port(container_id: str, container_port: str, timeout_sec: int = 60) -> str:
     start = time.time()
     last_err = None
@@ -54,7 +76,8 @@ def wait_for_port(container_id: str, container_port: str, timeout_sec: int = 60)
 
 def resolve_devcontainer(repo_url: str) -> dict:
     with tempfile.TemporaryDirectory() as tmp:
-        sh(["git", "clone", "--depth", "1", repo_url, tmp])
+        # sh(["git", "clone", "--depth", "1", repo_url, tmp])
+        sh(["git", "clone", repo_url, tmp])  # remove --depth 1
         dc_path = os.path.join(tmp, ".devcontainer", "devcontainer.json")
         if os.path.exists(dc_path):
             with open(dc_path) as f:
@@ -79,9 +102,17 @@ def db_init():
             image TEXT NOT NULL,
             updated_at INTEGER NOT NULL
         )""")
+
+        con.execute("""CREATE TABLE IF NOT EXISTS volume_history (
+            username TEXT PRIMARY KEY,
+            volume_name TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        )""")
+
         con.commit()
     finally:
         con.close()
+
 
 def db_get_prebuilt(repo_url: str):
     con = sqlite3.connect(DB_PATH)
@@ -134,17 +165,27 @@ def on_startup():
     t = threading.Thread(target=reap_idle_loop, daemon=True)
     t.start()
 
+
+
 # ---------------- API ----------------
 @app.post("/start-workspace")
 def start_workspace(
     repo: str = Form(...),
     username: str = Form(...),
-    prebuilt_image: str = Form(None)
+    prebuilt_image: str = Form(None),
+    reuse_volume: bool = Form(False),
+    custom_volume_name: str = Form(None)
 ):
     try:
         ws_id = f"{username}-{int(time.time()*1000)}-{uuid.uuid4().hex[:6]}".lower()
-        work_vol = f"code_{ws_id}"
+        if reuse_volume:
+            work_vol = custom_volume_name or db_get_last_volume(username) or f"code_{username}"
+        else:
+            work_vol = f"code_{ws_id}"
         tools_vol = f"tools_{username}".lower()
+        db_set_last_volume(username, work_vol)
+
+
 
         # Detect language + get .devcontainer or fallback image
         devc = resolve_devcontainer(repo)
@@ -171,35 +212,74 @@ def start_workspace(
             run_cmd += ["-e", f"PASSWORD={PASSWORD}", base_image]
             cid = sh(run_cmd)
             # Inject repo manually
+            # Clone repo into /workspace
             sh([
                 "docker", "exec", "-i", cid, "bash", "-lc",
-                f"apt-get update || true; apt-get install -y git curl || true; "
-                f"rm -rf /workspace/* 2>/dev/null || true; git clone '{repo}' /workspace || true"
+                f"""
+                apt-get update || true
+                apt-get install -y git curl || true
+                rm -rf /workspace/* 2>/dev/null || true
+                git clone '{repo}' /workspace || echo 'git-clone-failed' > /workspace/.repo_sha
+                """
             ])
+
+            # Write SHA only if repo clone succeeded
+            sh([
+                "docker", "exec", "-i", cid, "bash", "-lc",
+                f"""
+                if [ -d /workspace/.git ]; then
+                    cd /workspace && git rev-parse HEAD > .repo_sha
+                else
+                    echo 'no-repo' > /workspace/.repo_sha
+                fi
+                """
+            ])
+
+
         else:
             run_cmd += [
                 base_image, "bash", "-lc", f"""
-set -e
-apt-get update && apt-get install -y curl git ca-certificates || true
-if [ -z "$(ls -A /workspace 2>/dev/null)" ]; then git clone '{repo}' /workspace || true; fi
-curl -fsSL https://code-server.dev/install.sh | sh
-export PASSWORD='{PASSWORD}'
-exec code-server /workspace --auth password --bind-addr 0.0.0.0:{container_port}
-"""
+        set -e
+        apt-get update && apt-get install -y curl git ca-certificates || true
+        if [ -z "$(ls -A /workspace 2>/dev/null)" ]; then git clone '{repo}' /workspace || true; fi
+        curl -fsSL https://code-server.dev/install.sh | sh
+        export PASSWORD='{PASSWORD}'
+        exec code-server /workspace --auth password --bind-addr 0.0.0.0:{container_port}
+        """
             ]
             cid = sh(run_cmd)
 
-        # Optional postCreateCommand from devcontainer.json
-        if devc.get("postCreateCommand"):
+            # ✅ WRITE SHA **after** container is up
             sh([
                 "docker", "exec", "-i", cid, "bash", "-lc",
-                f"cd /workspace && {devc['postCreateCommand']}"
+                "cd /workspace && git rev-parse HEAD > .repo_sha || echo unknown > /workspace/.repo_sha"
             ], allow_fail=True)
+
+
+
+        # Optional postCreateCommand from devcontainer.json
+        if devc.get("postCreateCommand"):
+            # sh([
+            #     "docker", "exec", "-i", cid, "bash", "-lc",
+            #     f"cd /workspace && {devc['postCreateCommand']}"
+            # ], allow_fail=True)
+            # Save SHA after git clone (common to all cases)
+                sh(["docker", "exec", "-i", cid, "bash", "-lc", """
+                if [ -d /workspace/.git ]; then
+                cd /workspace && git rev-parse HEAD > .repo_sha
+                else
+                echo 'no-repo' > /workspace/.repo_sha
+                fi
+                """], allow_fail=True)
+
 
         # Wait until host port is mapped
         host_port = wait_for_port(cid, container_port, timeout_sec=120)
         # host_port = wait_for_port(cid, container_port, timeout_sec=120)
         mark_ping(cid)
+
+        print(f"Using volume: {work_vol}")
+
 
         return {
             "message": "Workspace started",
@@ -207,11 +287,24 @@ exec code-server /workspace --auth password --bind-addr 0.0.0.0:{container_port}
             "container_id": cid,
             "image_used": base_image,
             "devcontainer_used": bool(devc),
-            "idle_timeout_minutes": IDLE_MINUTES
+            "idle_timeout_minutes": IDLE_MINUTES,
+            "volume": work_vol
+
         }
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+@app.get("/volumes")
+def list_volumes():
+    try:
+        out = sh(["docker", "volume", "ls", "--format", "{{.Name}}"])
+        return {"volumes": out.splitlines()}  # remove filtering temporarily
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
 
 
 @app.post("/stop-workspace")
@@ -221,6 +314,61 @@ def stop_workspace(container_id: str = Form(...)):
         return {"message": "Stopped", "container_id": container_id}
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
+
+@app.post("/rebuild-workspace")
+def rebuild_workspace(
+    container_id: str = Form(...),
+    repo: str = Form(...),
+    username: str = Form(...),
+    prebuilt_image: str = Form(None)
+):
+    try:
+        # Delete existing container
+        sh(["docker", "rm", "-f", container_id])
+        with last_ping_lock:
+            last_ping.pop(container_id, None)
+        
+        # Call same logic as start_workspace
+        return start_workspace(repo=repo, username=username, prebuilt_image=prebuilt_image)
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+@app.get("/check-update")
+def check_update(container_id: str = Query(...), repo: str = Query(...)):
+    try:
+        stored_sha_out = sh(["docker", "exec", "-i", container_id, "bash", "-lc", "cat /workspace/.repo_sha"], allow_fail=True)
+        stored_sha = stored_sha_out.strip().splitlines()[0] if stored_sha_out else "missing"
+
+        if not stored_sha or stored_sha in ["", "missing", "unknown", "no-repo"] or "No such file" in stored_sha:
+            return {
+                "container_id": container_id,
+                "repo": repo,
+                "status": "unknown",
+                "message": f"Stored SHA missing: {stored_sha}"
+            }
+
+        latest_sha_line = sh(["git", "ls-remote", repo, "HEAD"])
+        latest_sha = latest_sha_line.split()[0].strip()
+
+        print(stored_sha)
+        print(latest_sha)
+
+        status = "up_to_date" if stored_sha == latest_sha else "outdated"
+
+        return {
+            "container_id": container_id,
+            "repo": repo,
+            "status": status,
+            "stored_sha": stored_sha,
+            "latest_sha": latest_sha
+        }
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+    
+
 
 @app.post("/start-container")
 def start_container(container_id: str = Form(...)):
@@ -277,6 +425,7 @@ def list_workspaces():
     #         lp = last_ping.get(cid)
     #     items.append({"id": cid, "image": image, "name": name, "ports": ports, "last_ping": lp})
     return items
+    
 
 @app.get("/logs")
 def get_logs(container_id: str = Query(..., alias="id")):
