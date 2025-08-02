@@ -3,11 +3,15 @@ import os, subprocess, uuid, time, json, tempfile, sqlite3, threading
 from fastapi import FastAPI, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
+from fastapi import HTTPException, Request
 
 # ---------------- Config ----------------
 PASSWORD = os.getenv("IDE_PASSWORD", "devpass123")
 IDLE_MINUTES = int(os.getenv("IDLE_MINUTES", "90"))   # stop after 90 minutes idle
 DB_PATH = os.path.join(os.path.dirname(__file__), "data.db")
+
+AUTH_TOKENS = {}  # username -> token
+USERS = {"admin": "devpass123"}
 
 # ---------------- App ----------------
 app = FastAPI()
@@ -165,9 +169,31 @@ def on_startup():
     t = threading.Thread(target=reap_idle_loop, daemon=True)
     t.start()
 
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    public_paths = ["/login", "/docs", "/openapi.json", "/volumes"]
+    if request.url.path in public_paths or request.method == "OPTIONS":
+        return await call_next(request)
+
+    token = request.headers.get("Authorization")
+    if token and token.startswith("Bearer "):
+        auth_token = token.split(" ")[1]
+        if auth_token in AUTH_TOKENS.values():
+            return await call_next(request)
+
+    return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
 
 # ---------------- API ----------------
+
+@app.post("/login")
+async def login(username: str = Form(...), password: str = Form(...)):
+    if username in USERS and USERS[username] == password:
+        token = uuid.uuid4().hex
+        AUTH_TOKENS[username] = token
+        return {"token": token}
+    raise HTTPException(status_code=401, detail="Invalid credentials")
+
 @app.post("/start-workspace")
 def start_workspace(
     repo: str = Form(...),
