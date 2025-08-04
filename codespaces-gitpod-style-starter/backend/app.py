@@ -4,11 +4,14 @@ from fastapi import FastAPI, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 from fastapi import HTTPException, Request
+import asyncio
+import datetime
 
 # ---------------- Config ----------------
 PASSWORD = os.getenv("IDE_PASSWORD", "devpass123")
-IDLE_MINUTES = int(os.getenv("IDLE_MINUTES", "90"))   # stop after 90 minutes idle
+IDLE_MINUTES = int(os.getenv("IDLE_MINUTES", "1"))   # stop after 90 minutes idle
 DB_PATH = os.path.join(os.path.dirname(__file__), "data.db")
+IDLE_TIMEOUT_MINUTES = 1
 
 AUTH_TOKENS = {}  # username -> token
 USERS = {"admin": "devpass123"}
@@ -113,9 +116,15 @@ def db_init():
             updated_at INTEGER NOT NULL
         )""")
 
+        con.execute("""CREATE TABLE IF NOT EXISTS workspaces (
+            container_id TEXT PRIMARY KEY,
+            last_ping INTEGER
+        )""")
+
         con.commit()
     finally:
         con.close()
+
 
 
 def db_get_prebuilt(repo_url: str):
@@ -137,8 +146,21 @@ def db_set_prebuilt(repo_url: str, image: str):
 
 # ---------------- Idle Reaper ----------------
 def mark_ping(container_id: str):
+    now = int(time.time())
     with last_ping_lock:
-        last_ping[container_id] = time.time()
+        last_ping[container_id] = now
+
+    con = sqlite3.connect(DB_PATH)
+    try:
+        con.execute("""
+            INSERT INTO workspaces(container_id, last_ping)
+            VALUES (?, ?)
+            ON CONFLICT(container_id) DO UPDATE SET last_ping=excluded.last_ping
+        """, (container_id, now))
+        con.commit()
+    finally:
+        con.close()
+
 
 def reap_idle_loop():
     # background thread
@@ -163,11 +185,36 @@ def reap_idle_loop():
             # never crash
             pass
 
+async def stop_idle_containers_task():
+    while True:
+        print("🔍 Checking for idle containers...")
+        now = int(datetime.datetime.now().timestamp())
+        try:
+            con = sqlite3.connect(DB_PATH)
+            cur = con.cursor()
+            cur.execute("SELECT container_id, last_ping FROM workspaces")
+            rows = cur.fetchall()
+            con.close()
+
+            for cid, last_ping in rows:
+                if last_ping is None:
+                    continue
+                idle_minutes = (now - last_ping) / 60
+                if idle_minutes > IDLE_TIMEOUT_MINUTES:
+                    print(f"⏸️ Stopping idle container: {cid} (idle {int(idle_minutes)} min)")
+                    subprocess.run(["docker", "stop", cid])
+        except Exception as e:
+            print(f"⚠️ Error in idle timeout task: {e}")
+
+        await asyncio.sleep(300)  # every 5 min
+
 @app.on_event("startup")
 def on_startup():
     db_init()
     t = threading.Thread(target=reap_idle_loop, daemon=True)
     t.start()
+    asyncio.create_task(stop_idle_containers_task())  # 🔥 ensure this is running
+
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
@@ -503,9 +550,18 @@ def get_logs(container_id: str = Query(..., alias="id")):
 
 @app.post("/ping")
 def ping(container_id: str = Form(...)):
-    # called by frontend every minute to keep workspace alive
     mark_ping(container_id)
+
+    # 🧠 Update DB with current time
+    con = sqlite3.connect(DB_PATH)
+    try:
+        con.execute("INSERT OR REPLACE INTO workspaces (container_id, last_ping) VALUES (?, ?)", (container_id, int(time.time())))
+        con.commit()
+    finally:
+        con.close()
+
     return {"ok": True, "idle_timeout_minutes": IDLE_MINUTES}
+
 
 # --- Prebuild mapping endpoints ---
 @app.post("/prebuild")
