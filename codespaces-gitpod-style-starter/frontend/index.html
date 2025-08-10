@@ -6,20 +6,47 @@
   <style>
     body {
       font-family: Arial, sans-serif;
-      padding: 2em;
-      background: #f4f4f4;
+      margin: 0;
+      background: #f9f9f9;
     }
-    h2 {
-      margin-top: 2em;
+    header {
+      background: #007bff;
+      color: white;
+      padding: 1em;
+      text-align: center;
+    }
+    nav {
+      display: flex;
+      background: #f1f1f1;
+      padding: 0.5em;
+      justify-content: center;
+      gap: 1em;
+    }
+    nav button {
+      padding: 0.5em 1em;
+      background: #ddd;
+      border: none;
+      cursor: pointer;
+    }
+    nav button.active {
+      background: #007bff;
+      color: white;
+    }
+    section {
+      display: none;
+      padding: 1em;
+    }
+    section.active {
+      display: block;
     }
     form {
-      background: #fff;
+      background: white;
       padding: 1em;
-      margin-bottom: 2em;
+      margin: 1em 0;
       border-radius: 5px;
       box-shadow: 0 0 5px rgba(0,0,0,0.1);
     }
-    input, button {
+    input, select, button {
       padding: 0.5em;
       margin: 0.3em 0;
       width: 100%;
@@ -28,8 +55,6 @@
     button {
       background: #007bff;
       color: #fff;
-      border: none;
-      cursor: pointer;
     }
     button:hover {
       background: #0056b3;
@@ -40,7 +65,12 @@
       padding: 0.5em;
       font-family: monospace;
       overflow-y: auto;
-      max-height: 200px;
+      max-height: 150px;
+    }
+    .logout {
+      float: right;
+      margin-right: 1em;
+      background: red;
     }
     table {
       width: 100%;
@@ -48,258 +78,240 @@
       margin-top: 1em;
       background: #fff;
     }
-    table, th, td {
-      border: 1px solid #ccc;
-    }
     th, td {
+      border: 1px solid #ccc;
       padding: 0.5em;
-      text-align: left;
     }
   </style>
 </head>
 <body>
 
-<h1>Dev Workspace Launcher</h1>
-<button onclick="logout()">🚪 Logout</button>
+<header>
+  Dev Workspace Launcher
+  <button class="logout" onclick="logout()">Logout</button>
+</header>
 
-<!-- 🔐 Login -->
-<form id="login-form">
-  <h2>🔐 Login</h2>
-  <input type="text" id="login-username" placeholder="Username" required>
-  <input type="password" id="login-password" placeholder="Password" required>
-  <button type="submit">Login</button>
-  <pre class="log" id="login-log"></pre>
-</form>
+<!-- Navigation Tabs -->
+<nav>
+  <button onclick="switchTab('login')" id="tab-login">Login</button>
+  <button onclick="switchTab('workspace')" id="tab-workspace">Workspace</button>
+  <button onclick="switchTab('devcontainer')" id="tab-devcontainer">DevContainer</button>
+  <button onclick="switchTab('prebuild')" id="tab-prebuild">Prebuild</button>
+  <button onclick="switchTab('dashboard')" id="tab-dashboard">Dashboard</button>
+</nav>
 
-<!-- 🚀 Start Workspace -->
-<form id="workspace-form">
-  <h2>🚀 Start a Workspace</h2>
-  <label>Repo URL:</label>
-  <input type="text" name="repo" value="https://github.com/HARSHALJETHWA19/ansible-project" required>
-  
-  <label>Username:</label>
-  <input type="text" name="username" value="admin" required>
+<!-- Login Section -->
+<section id="login">
+  <form id="login-form">
+    <h2>🔐 Login</h2>
+    <input type="text" id="login-username" placeholder="Username" required>
+    <input type="password" id="login-password" placeholder="Password" required>
+    <button type="submit">Login</button>
+    <pre class="log" id="login-log"></pre>
+  </form>
+</section>
 
-  <label>Prebuilt image (optional):</label>
-  <input type="text" name="prebuilt_image" placeholder="ghcr.io/org/repo-devcontainer:sha">
+<!-- Workspace Section -->
+<section id="workspace">
+  <form id="workspace-form">
+    <h2>🚀 Start a Workspace</h2>
+    <input type="text" name="repo" placeholder="GitHub Repo URL" required>
+    <input type="text" name="username" placeholder="Username" required>
+    <input type="text" name="prebuilt_image" placeholder="Prebuilt Image (optional)">
+    <label><input type="checkbox" id="reuseVolume"> Reuse my previous workspace</label>
 
-  <label><input type="checkbox" id="reuseVolume"> Reuse my previous workspace</label>
+    <select id="volumeSelector">
+      <option value="">-- Select Existing Volume --</option>
+    </select>
+    <div id="volumeList"></div>
 
-  <label>Custom Volume (optional):</label>
-  <select id="volumeSelector">
-    <option value="">-- Select Existing Volume --</option>
-  </select>
+    <button type="submit">Launch</button>
+    <pre class="log" id="workspace-log"></pre>
+  </form>
+</section>
 
-  <button type="submit">Launch</button>
-  <pre class="log" id="workspace-log"></pre>
-</form>
+<!-- DevContainer Section -->
+<section id="devcontainer">
+  <form id="devcontainer-form">
+    <h2>⚙️ Generate .devcontainer.json</h2>
+    <input type="text" name="repo" placeholder="Repo URL" required>
+    <select name="language" required>
+      <option value="node">Node.js</option>
+      <option value="python">Python</option>
+      <option value="java">Java</option>
+      <option value="go">Go</option>
+      <option value="dotnet">.NET</option>
+    </select>
+    <input type="text" name="ports" placeholder="Ports (comma-separated)">
+    <input type="text" name="post_create" placeholder="Post Create Command">
+    <button type="submit">Generate</button>
+    <pre class="log" id="dev-log"></pre>
+  </form>
+</section>
 
-<!-- ⚙️ Devcontainer Generator -->
-<form id="devcontainer-form">
-  <h2>⚙️ Generate .devcontainer.json</h2>
-  <label>Repo URL:</label>
-  <input type="text" name="repo" required value="https://github.com/HARSHALJETHWA19/ansible-project">
+<!-- Prebuild Section -->
+<section id="prebuild">
+  <form id="prebuild-form">
+    <h2>💾 Prebuild Mapping</h2>
+    <input type="text" name="repo" placeholder="Repo URL" required>
+    <input type="text" name="image" placeholder="Image" required>
+    <button type="submit">Save Mapping</button>
+    <pre class="log" id="prebuild-log"></pre>
+  </form>
+</section>
 
-  <label>Language:</label>
-  <select name="language" required>
-    <option value="node">Node.js</option>
-    <option value="python">Python</option>
-    <option value="java">Java</option>
-    <option value="go">Go</option>
-    <option value="dotnet">.NET</option>
-  </select>
-
-  <label>Ports (comma-separated):</label>
-  <input type="text" name="ports" placeholder="3000,8000">
-
-  <label>Post Create Command:</label>
-  <input type="text" name="post_create" placeholder="npm ci">
-
-  <button type="submit">Generate</button>
-  <pre class="log" id="dev-log"></pre>
-</form>
-
-<!-- 💾 Prebuild Mapping -->
-<form id="prebuild-form">
-  <h2>💾 Prebuild Mapping (SQLite)</h2>
-  <label>Repo URL:</label>
-  <input type="text" name="repo" required value="https://github.com/HARSHALJETHWA19/ansible-project">
-
-  <label>Image:</label>
-  <input type="text" name="image" required value="mcr.microsoft.com/devcontainers/dotnet:9.0">
-
-  <button type="submit">Save Mapping</button>
-  <pre class="log" id="prebuild-log"></pre>
-</form>
-
-<!-- 📊 Live Dashboard -->
-<h2 id="dashboard-heading">📊 Live Dashboard</h2>
-<button onclick="refreshWorkspaces()">🔄 Refresh</button>
-<table id="workspace-table">
-  <thead>
-    <tr>
-      <th>Container ID</th>
-      <th>Image</th>
-      <th>Name</th>
-      <th>Port</th>
-      <th>Last Ping</th>
-      <th>Status</th>
-      <th>Action</th>
-    </tr>
-  </thead>
-  <tbody></tbody>
-</table>
-<!-- 📜 Log Viewer Modal -->
-<div id="logModal" style="
-  display:none; 
-  background:#111; 
-  color:#0f0; 
-  padding:1em; 
-  max-height:400px; 
-  overflow:auto; 
-  white-space:pre-wrap;
-  margin-top: 1em;
-  border: 1px solid #444;
-  border-radius: 5px;
-"></div>
-<button onclick="closeLogs()" style="display:none;" id="closeLogBtn">Close Logs</button>
+<!-- Dashboard Section -->
+<section id="dashboard">
+  <h2>📊 Live Dashboard</h2>
+  <button onclick="refreshWorkspaces()">🔄 Refresh</button>
+  <table id="workspace-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Image</th>
+        <th>Name</th>
+        <th>Port</th>
+        <th>Last Ping</th>
+        <th>Status</th>
+        <th>Actions</th>
+        <th>Logs</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</section>
 
 <script>
 const base = "http://localhost:8000";
 
-// Auth check
+function authHeader() {
+  return {
+    "Authorization": "Bearer " + localStorage.getItem("authToken"),
+    "Content-Type": "application/x-www-form-urlencoded"
+  };
+}
+
+
+function switchTab(tab) {
+  if (!isAuthenticated() && tab !== 'login') {
+    alert("🔒 Please log in to access this section.");
+    return;
+  }
+  document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById(tab).classList.add('active');
+  document.getElementById(`tab-${tab}`).classList.add('active');
+}
+
 function isAuthenticated() {
   return !!localStorage.getItem("authToken");
 }
 
-function timeSinceMinutes(ts) {
-  return Math.floor((Date.now() / 1000 - ts) / 60);
-}
-
-
-function showDashboard() {
-  document.getElementById("workspace-form").style.display = "block";
-  document.getElementById("prebuild-form").style.display = "block";
-  document.getElementById("workspace-table").style.display = "table";
-  document.getElementById("devcontainer-form").style.display = "block";
-  document.getElementById("dashboard-heading").style.display = "block";
-  refreshWorkspaces();
-  loadVolumes();
-}
-
-function hideDashboard() {
-  document.getElementById("workspace-form").style.display = "none";
-  document.getElementById("prebuild-form").style.display = "none";
-  document.getElementById("workspace-table").style.display = "none";
-  document.getElementById("devcontainer-form").style.display = "none";
-  document.getElementById("dashboard-heading").style.display = "none";
-}
-
-if (isAuthenticated()) {
-  showDashboard();
-} else {
-  hideDashboard();
-}
-
 function logout() {
   localStorage.removeItem("authToken");
-  location.reload();
+  alert("You have been logged out.");
+  switchTab("login");
 }
 
-document.getElementById("login-form").onsubmit = async (e) => {
+
+async function secureFetch(url, options = {}) {
+  const token = localStorage.getItem("authToken");
+
+  if (!options.headers) options.headers = {};
+  options.headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(url, options);
+
+  if (res.status === 401) {
+    alert("🔒 Session expired. Please login again.");
+    localStorage.removeItem("authToken");
+    switchTab("login");
+    return { error: "unauthorized" };
+  }
+
+  return res;
+}
+
+
+// Initial page setup
+if (isAuthenticated()) {
+  switchTab('dashboard');
+  loadVolumes();
+  refreshWorkspaces();
+} else {
+  switchTab('login');
+}
+
+// Login form
+document.getElementById("login-form").onsubmit = async e => {
   e.preventDefault();
   const username = document.getElementById("login-username").value;
   const password = document.getElementById("login-password").value;
   const log = document.getElementById("login-log");
-
   log.textContent = "Logging in...";
-
-  const body = new URLSearchParams();
-  body.append("username", username);
-  body.append("password", password);
 
   const res = await fetch(`${base}/login`, {
     method: "POST",
-    body
+    body: new URLSearchParams({ username, password })
   });
 
   const json = await res.json();
   if (res.ok) {
     localStorage.setItem("authToken", json.token);
-    log.textContent = "✅ Logged in!";
-    showDashboard();
+    switchTab('dashboard');
+    loadVolumes();
+    refreshWorkspaces();
   } else {
     log.textContent = "❌ Login failed: " + json.detail;
   }
 };
 
-document.getElementById("workspace-form").onsubmit = async (e) => {
+// Workspace form
+document.getElementById("workspace-form").onsubmit = async e => {
   e.preventDefault();
-  const wsLog = document.getElementById("workspace-log");
-  wsLog.textContent = "Starting...";
-  const formData = new FormData(e.target);
+  const log = document.getElementById("workspace-log");
+  const form = new FormData(e.target);
+  form.append('reuse_volume', document.getElementById('reuseVolume').checked);
+  const selected = document.getElementById("volumeSelector").value;
+  if (selected) form.append("custom_volume_name", selected);
 
-  const reuseVolume = document.getElementById('reuseVolume').checked;
-  formData.append('reuse_volume', reuseVolume);
-
-  const selectedVolume = document.getElementById("volumeSelector").value;
-  if (selectedVolume) {
-    formData.append("custom_volume_name", selectedVolume);
-  }
-
-  const res = await fetch(`${base}/start-workspace`, {
+  const res = await secureFetch(`${base}/start-workspace`, {
     method: "POST",
-    body: formData,
-    headers: { "Authorization": "Bearer " + localStorage.getItem("authToken") }
+    body: form
   });
-
   const json = await res.json();
-  wsLog.textContent = JSON.stringify(json, null, 2);
-  if (json.workspace_url) {
-    const a = document.createElement("a");
-    a.href = json.workspace_url;
-    a.textContent = "👉 Open IDE";
-    a.target = "_blank";
-    wsLog.appendChild(document.createElement("br"));
-    wsLog.appendChild(a);
-  }
+  log.textContent = JSON.stringify(json, null, 2);
   refreshWorkspaces();
 };
 
-document.getElementById("prebuild-form").onsubmit = async (e) => {
+// DevContainer form
+document.getElementById("devcontainer-form").onsubmit = async e => {
   e.preventDefault();
-  const log = document.getElementById("prebuild-log");
-  log.textContent = "Saving...";
-  const formData = new FormData(e.target);
-  const res = await fetch(`${base}/prebuild`, {
+  const log = document.getElementById("dev-log");
+  const form = new FormData(e.target);
+  const res = await secureFetch(`${base}/generate-devcontainer`, {
     method: "POST",
-    body: formData,
-    headers: { "Authorization": "Bearer " + localStorage.getItem("authToken") }
+    body: form
   });
   const json = await res.json();
   log.textContent = JSON.stringify(json, null, 2);
 };
 
-document.getElementById("devcontainer-form").onsubmit = async (e) => {
+// Prebuild form
+document.getElementById("prebuild-form").onsubmit = async e => {
   e.preventDefault();
-  const log = document.getElementById("dev-log");
-  log.textContent = "Generating...";
-  const formData = new FormData(e.target);
-  const res = await fetch(`${base}/generate-devcontainer`, {
+  const log = document.getElementById("prebuild-log");
+  const form = new FormData(e.target);
+  const res = await secureFetch(`${base}/prebuild`, {
     method: "POST",
-    body: formData,
-    headers: { "Authorization": "Bearer " + localStorage.getItem("authToken") }
+    body: form
   });
   const json = await res.json();
   log.textContent = JSON.stringify(json, null, 2);
 };
 
 async function refreshWorkspaces() {
-  const res = await fetch(`${base}/workspaces`, {
-  headers: {
-    "Authorization": "Bearer " + localStorage.getItem("authToken")
-  }
-});
+  const res = await secureFetch(`${base}/workspaces`);
   const data = await res.json();
   const tbody = document.querySelector("#workspace-table tbody");
   tbody.innerHTML = "";
@@ -310,118 +322,32 @@ async function refreshWorkspaces() {
       <td>${w.image}</td>
       <td>${w.name}</td>
       <td>${w.ports}</td>
-      <td style="color: ${w.last_ping && timeSinceMinutes(w.last_ping) > 30 ? 'red' : 'black'}">
-  ${w.last_ping ? timeSince(w.last_ping) + " ago" : "?"}
+      <td>${w.last_ping ? timeSince(w.last_ping) + " ago" : "?"}</td>
+      <td style="color:${w.status.includes('Up') ? 'green' : 'red'}">${w.status}</td>
+     <td>
+  <button onclick="stopWorkspace('${w.id}')">⏸</button>
+  <button onclick="startWorkspace('${w.id}')">▶️</button>
+  <button onclick="deleteWorkspace('${w.id}')">🗑</button>
+  <button onclick="viewLogs('${w.id}')">📄 Logs</button>
 </td>
-      <td style="color: ${w.status.includes('Up') ? 'green' : 'red'}">${w.status}</td>
-      <td>
-        ${w.status.includes("Up") ? `<button onclick="stopWorkspace('${w.id}')">⏸️ Stop</button>` : `<button onclick="startWorkspace('${w.id}')">▶️ Start</button>`}
-        <button onclick="deleteWorkspace('${w.id}')">🗑️ Delete</button>
-        <button onclick="checkUpdate('${w.id}', '${w.name}')">🔄 Check Update</button>
-        <button onclick="showLogs('${w.id}')">📜 Logs</button>
-      </td>
+
     `;
     tbody.appendChild(tr);
   });
 }
 
-async function stopWorkspace(id) {
-  await fetch(`${base}/stop-workspace`, {
-    method: "POST",
-    body: new URLSearchParams({ container_id: id }),
-    headers: { "Authorization": "Bearer " + localStorage.getItem("authToken") }
-  });
-  refreshWorkspaces();
-}
-
-async function deleteWorkspace(id) {
-  if (confirm(`Delete workspace ${id}?`)) {
-    await fetch(`${base}/delete-workspace`, {
-      method: "POST",
-      body: new URLSearchParams({ container_id: id }),
-      headers: { "Authorization": "Bearer " + localStorage.getItem("authToken") }
-    });
-    refreshWorkspaces();
-  }
-}
-
-async function startWorkspace(id) {
-  await fetch(`${base}/start-container`, {
-    method: "POST",
-    body: new URLSearchParams({ container_id: id }),
-    headers: { "Authorization": "Bearer " + localStorage.getItem("authToken") }
-  });
-  refreshWorkspaces();
-}
-
-// async function showLogs(id) {
-//   const res = await fetch(`${base}/logs?id=${id}`, {
-//   headers: {
-//     "Authorization": "Bearer " + localStorage.getItem("authToken")
-//   }
-// });
-//   const json = await res.json();
-//   alert(`Logs for ${id}:\n\n` + json.logs);
-// }
-
-async function showLogs(id) {
-  const res = await fetch(`${base}/logs?id=${id}`, {
-    headers: {
-      "Authorization": "Bearer " + localStorage.getItem("authToken")
-    }
-  });
-  const json = await res.json();
-  const logModal = document.getElementById("logModal");
-  logModal.textContent = `Logs for ${id}:\n\n` + json.logs;
-  logModal.style.display = "block";
-  document.getElementById("closeLogBtn").style.display = "block";
-}
-
-function closeLogs() {
-  document.getElementById("logModal").style.display = "none";
-  document.getElementById("closeLogBtn").style.display = "none";
-}
-
-
-async function checkUpdate(id, name) {
-  const repo = document.querySelector('input[name="repo"]').value;
-  const res = await fetch(`${base}/check-update?container_id=${id}&repo=${encodeURIComponent(repo)}`, {
-  headers: {
-    "Authorization": "Bearer " + localStorage.getItem("authToken")
-  }
-});
-  
-  const json = await res.json();
-
-  alert(`Container ${id} is ${json.status.toUpperCase()}\nStored SHA: ${json.stored_sha}\nLatest SHA: ${json.latest_sha}`);
-
-  if (json.status === "outdated") {
-    if (confirm("Repo changed. Rebuild workspace?")) {
-      await rebuildWorkspace(id, repo, name.split("-")[0]);
-    }
-  }
-}
-
-async function rebuildWorkspace(id, repo, username) {
-  const image = document.querySelector('input[name="prebuilt_image"]').value;
-  const body = new URLSearchParams({ container_id: id, repo, username });
-  if (image) body.append("prebuilt_image", image);
-
-  const res = await fetch(`${base}/rebuild-workspace`, {
-    method: "POST",
-    body,
-    headers: { "Authorization": "Bearer " + localStorage.getItem("authToken") }
-  });
-  const json = await res.json();
-  alert("Rebuilt:\n" + JSON.stringify(json, null, 2));
-  refreshWorkspaces();
+function timeSince(ts) {
+  const s = Math.floor(Date.now() / 1000 - ts);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
 async function loadVolumes() {
-  const res = await fetch(`${base}/volumes`);
+  const res = await secureFetch(`${base}/volumes`);
   const data = await res.json();
   const selector = document.getElementById("volumeSelector");
-  selector.innerHTML = `<option value="">-- Select Existing Volume --</option>`;
+  selector.innerHTML = '<option value="">-- Select Existing Volume --</option>';
   data.volumes.forEach(v => {
     const opt = document.createElement("option");
     opt.value = v;
@@ -430,14 +356,45 @@ async function loadVolumes() {
   });
 }
 
-function timeSince(ts) {
-  const seconds = Math.floor(Date.now() / 1000 - ts);
-  const mins = Math.floor(seconds / 60);
-  if (mins < 1) return `${seconds}s`;
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60);
-  return `${hours}h ${mins % 60}m`;
+async function viewLogs(id) {
+  const res = await secureFetch(`${base}/logs?id=${id}`);
+  const data = await res.json();
+  alert("📜 Logs for " + id + ":\n\n" + data.logs);
 }
+
+async function stopWorkspace(id) {
+  await secureFetch(`${base}/stop-workspace`, {
+    method: "POST",
+    body: new URLSearchParams({ container_id: id })
+  });
+  refreshWorkspaces();
+}
+
+async function startWorkspace(id) {
+  const form = new FormData();
+  form.append("container_id", id);
+  const res = await secureFetch(`${base}/start-workspace`, {
+    method: "POST",
+    body: form
+  });
+  const json = await res.json();
+  alert("Started: " + json.message);
+  refreshWorkspaces();
+}
+
+async function deleteWorkspace(id) {
+  const form = new FormData();
+  form.append("container_id", id);
+  const res = await secureFetch(`${base}/delete-workspace`, {
+    method: "POST",
+    body: form
+  });
+  const json = await res.json();
+  alert("Deleted: " + json.message);
+  refreshWorkspaces();
+}
+
 </script>
+
 </body>
 </html>
